@@ -1,13 +1,22 @@
 import tkinter as tk
-from tkinter import messagebox, simpledialog, ttk
+import tkinter.ttk as ttk  # ✅ 핵심
+from tkinter import messagebox, simpledialog  # ✅ OK
 from PIL import Image, ImageTk
 import sqlite3
 import bcrypt
 import os
+
 from admin import admin_panel, set_current_user
+from theme import apply_theme
+
+
 
 current_user = None
+is_dark_theme = False
 
+
+root = tk.Tk()
+apply_theme(root)  # 스타일 적용!
 def set_current_user(user):
     global current_user
     current_user = user
@@ -198,16 +207,22 @@ def add_product():
 
 
 # -------------------- 상품 목록 --------------------
-def list_products():
+def list_products(order="ASC"):
     conn = sqlite3.connect("airforce_market.db")
     c = conn.cursor()
-    c.execute("SELECT p.id, p.name, p.price, u.username FROM products p JOIN users u ON p.seller_id = u.id")
+    query = f"""
+        SELECT p.id, p.name, p.price, u.username 
+        FROM products p 
+        JOIN users u ON p.seller_id = u.id 
+        ORDER BY p.price {order}
+    """
+    c.execute(query)
     rows = c.fetchall()
     conn.close()
+
     product_list.delete(*product_list.get_children())
     for row in rows:
         product_list.insert("", "end", values=(row[0], row[1], f"{row[2]}원", row[3]))
-
 
 # -------------------- 장바구니 --------------------
 def add_to_cart():
@@ -311,7 +326,40 @@ def delete_product():
 
 
 
+def refresh_home():
+    list_products()
+    if current_user:
+        login_status.config(text=f"현재 로그인: {current_user['username']}")
+        btn_login.grid_remove()
+        btn_register.grid_remove()
+        btn_logout.grid()
+        btn_admin_menu.grid()
+    else:
+        login_status.config(text="로그인 필요")
+        btn_logout.grid_remove()
+        btn_login.grid()
+        btn_register.grid()
+        btn_admin_menu.grid_remove()
 
+
+def toggle_theme():
+    global is_dark_theme
+    is_dark_theme = not is_dark_theme
+
+    if is_dark_theme:
+        bg_color = "#2e2e2e"
+        fg_color = "#ffffff"
+    else:
+        bg_color = "#f0f4f8"
+        fg_color = "#000000"
+
+    root.configure(bg=bg_color)
+    top_frame.configure(bg=bg_color)
+    logo_frame.configure(bg=bg_color)
+    btn_frame.configure(bg=bg_color)
+    login_status.configure(bg=bg_color, fg=fg_color)
+
+    # 버튼도 재색칠하고 싶다면 Style 활용 가능
 
 
 # -------------------- 상품 상세 보기 --------------------
@@ -377,7 +425,7 @@ def create_default_admin():
 create_default_admin()
 
 
-root = tk.Tk()
+
 root.title("공군마켓 - AirForce Market")
 root.geometry("1200x700")
 root.configure(bg="#f0f4f8")
@@ -403,21 +451,27 @@ btn_frame.pack(pady=10)
 
 
 # 버튼 선언
-btn_register = ttk.Button(btn_frame, text="회원가입", command=register)
-btn_login = ttk.Button(btn_frame, text="로그인", command=login)
-btn_logout = ttk.Button(btn_frame, text="로그아웃", command=logout)
-btn_add = ttk.Button(btn_frame, text="상품등록", command=add_product)
-btn_cart = ttk.Button(btn_frame, text="장바구니", command=view_cart)
-btn_sell = ttk.Button(btn_frame, text="✅ 판매 완료(삭제)", command=delete_product)
-btn_add_cart = ttk.Button(btn_frame, text="🛒 장바구니에 담기", command=add_to_cart)
-btn_detail = ttk.Button(btn_frame, text="🔍 상세보기", command=show_selected_product_detail)
+# 정렬 버튼
+btn_sort_asc = ttk.Button(btn_frame, text="⬆ 가격 낮은 순", style="Cool.TButton", command=lambda: list_products(order="ASC"))
+btn_sort_desc = ttk.Button(btn_frame, text="⬇ 가격 높은 순", style="Cool.TButton", command=lambda: list_products(order="DESC"))
 
-#관리자메뉴
-btn_admin_menu = ttk.Button(btn_frame, text="👨‍✈️ 관리자 메뉴", command=admin_panel)
-btn_admin_menu.grid(row=1, column=0, padx=5)
+# 기능 버튼
+btn_register = ttk.Button(btn_frame, text="회원가입", style="Cool.TButton", command=register)
+btn_login = ttk.Button(btn_frame, text="로그인", style="Cool.TButton", command=login)
+btn_logout = ttk.Button(btn_frame, text="로그아웃", style="Cool.TButton", command=logout)
+btn_add = ttk.Button(btn_frame, text="상품등록", style="Cool.TButton", command=add_product)
+btn_cart = ttk.Button(btn_frame, text="장바구니", style="Cool.TButton", command=view_cart)
+btn_sell = ttk.Button(btn_frame, text="✅ 판매 완료(삭제)", style="Cool.TButton", command=delete_product)
+btn_add_cart = ttk.Button(btn_frame, text="🛒 장바구니에 담기", style="Cool.TButton", command=add_to_cart)
+btn_detail = ttk.Button(btn_frame, text="🔍 상세보기", style="Cool.TButton", command=show_selected_product_detail)
+btn_refresh = ttk.Button(btn_frame, text="🔄 새로고침", style="Cool.TButton", command=refresh_home)
+btn_theme = ttk.Button(btn_frame, text="🌓 테마 전환", style="Cool.TButton", command=toggle_theme)
+
+# 관리자 메뉴
+btn_admin_menu = ttk.Button(btn_frame, text="👨‍✈️ 관리자 메뉴", style="Cool.TButton", command=admin_panel)
 btn_admin_menu.grid_remove()  # 기본은 숨김
 
-# 버튼들을 모두 한 줄에 정렬
+# 첫 번째 줄 버튼 배치
 btn_register.grid(row=0, column=0, padx=5)
 btn_login.grid(row=0, column=1, padx=5)
 btn_logout.grid(row=0, column=2, padx=5)
@@ -427,7 +481,18 @@ btn_sell.grid(row=0, column=5, padx=5)
 btn_admin_menu.grid(row=0, column=6, padx=5)
 btn_add_cart.grid(row=0, column=7, padx=5)
 btn_detail.grid(row=0, column=8, padx=5)
+btn_refresh.grid(row=0, column=9, padx=5)
 
+# 두 번째 줄
+btn_theme.grid(row=1, column=0, padx=5, pady=5)
+btn_sort_asc.grid(row=1, column=1, padx=5, pady=5)
+btn_sort_desc.grid(row=1, column=2, padx=5, pady=5)
+
+
+
+# 관리자 메뉴
+btn_admin_menu = ttk.Button(btn_frame, text="👨‍✈️ 관리자 메뉴", style="Cool.TButton", command=admin_panel)
+btn_admin_menu.grid_remove()  # 기본은 숨김
 
 
 
@@ -440,21 +505,6 @@ for col in columns:
     product_list.column(col, anchor="center")
 product_list.pack(fill="both", expand=True)
 
-
-def refresh_home():
-    list_products()
-    if current_user:
-        login_status.config(text=f"현재 로그인: {current_user['username']}")
-        btn_login.grid_remove()
-        btn_register.grid_remove()
-        btn_logout.grid()
-        btn_admin_menu.grid()
-    else:
-        login_status.config(text="로그인 필요")
-        btn_logout.grid_remove()
-        btn_login.grid()
-        btn_register.grid()
-        btn_admin_menu.grid_remove()
 
 
 refresh_home()

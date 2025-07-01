@@ -6,13 +6,15 @@ import sqlite3
 import bcrypt
 import os
 
-from admin import admin_panel, set_current_user
+from admin import admin_panel
+
 from theme import apply_theme
 
 
 
 current_user = None
 is_dark_theme = False
+price_sort_order = "ASC"  # 기본 정렬: 오름차순
 
 
 root = tk.Tk()
@@ -30,7 +32,8 @@ def init_db():
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         username TEXT UNIQUE,
         password TEXT,
-        is_admin INTEGER DEFAULT 0
+        is_admin INTEGER DEFAULT 0,
+        point INTEGER DEFAULT 3
     )''')
     c.execute('''CREATE TABLE IF NOT EXISTS products (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -54,6 +57,7 @@ def init_db():
 def register():
     reg_win = tk.Toplevel(root)
     reg_win.title("회원가입")
+    reg_win.geometry("300x220")
     reg_win.attributes('-topmost', True)
     reg_win.grab_set()
     reg_win.focus_set()
@@ -92,51 +96,50 @@ def register():
 
 # -------------------- 로그인 --------------------
 def login():
-    set_current_user(current_user)
+    global current_user
     login_win = tk.Toplevel(root)
     login_win.title("로그인")
+    login_win.geometry("300x200")
     login_win.attributes('-topmost', True)
     login_win.grab_set()
     login_win.focus_set()
-
 
     tk.Label(login_win, text="사용자 이름:").pack()
     username_entry = tk.Entry(login_win)
     username_entry.pack()
 
-
     tk.Label(login_win, text="비밀번호:").pack()
     password_entry = tk.Entry(login_win, show="*")
     password_entry.pack()
-
 
     def submit():
         global current_user
         username = username_entry.get()
         password = password_entry.get()
 
+        print("입력한 사용자명:", username)
+        print("입력한 비밀번호:", password)
 
         conn = sqlite3.connect("airforce_market.db")
         c = conn.cursor()
         c.execute("SELECT id, password, is_admin FROM users WHERE username=?", (username,))
         row = c.fetchone()
+        print("DB에서 찾은 사용자 정보:", row)
         conn.close()
-
 
         if row and bcrypt.checkpw(password.encode(), row[1]):
             current_user = {'id': row[0], 'username': username, 'is_admin': row[2]}
-            
-            from admin import set_current_user
             set_current_user(current_user)
+            print("로그인 성공! current_user:", current_user)
+
             messagebox.showinfo("로그인", f"{username}님 환영합니다!", parent=login_win)
             login_win.destroy()
             refresh_home()
         else:
+            print("로그인 실패")
             messagebox.showerror("실패", "로그인 실패", parent=login_win)
 
-
     tk.Button(login_win, text="로그인", command=submit).pack(pady=5)
-
 
 # -------------------- 로그아웃 --------------------
 def logout():
@@ -194,6 +197,7 @@ def add_product():
         c = conn.cursor()
         c.execute("INSERT INTO products (name, price, description, seller_id) VALUES (?, ?, ?, ?)",
                   (name, price, description, current_user['id']))
+        c.execute("UPDATE users SET point = point + 1 WHERE id = ?", (current_user['id'],))
         conn.commit()
         conn.close()
 
@@ -221,6 +225,14 @@ def list_products(order="ASC"):
     conn.close()
 
     product_list.delete(*product_list.get_children())
+
+    for i, column in enumerate(columns):
+        if column == "가격":
+            heading = "가격 ▼" if order == "DESC" else "가격 ▲"
+        else:
+            heading = column
+        product_list.heading(column, text=heading)
+
     for row in rows:
         product_list.insert("", "end", values=(row[0], row[1], f"{row[2]}원", row[3]))
 
@@ -285,6 +297,39 @@ def view_cart():
     # 총합 표시
     total_label = tk.Label(cart_win, text=f"총합: {total}원", font=("Arial", 12, "bold"))
     total_label.pack(pady=5)
+    
+    # 구매 버튼
+    def purchase_items():
+        conn = sqlite3.connect("airforce_market.db")
+        c = conn.cursor()
+
+        # 장바구니 개수
+        c.execute("SELECT COUNT(*) FROM cart WHERE user_id=?", (current_user['id'],))
+        count = c.fetchone()[0]
+
+        # 유저 포인트 확인
+        c.execute("SELECT point FROM users WHERE id=?", (current_user['id'],))
+        current_point = c.fetchone()[0]
+
+        if count == 0:
+            messagebox.showwarning("경고", "장바구니가 비어 있습니다.", parent=cart_win)
+            conn.close()
+            return
+        if current_point < count:
+            messagebox.showerror("포인트 부족", f"보유 포인트: {current_point} / 필요한 포인트: {count}", parent=cart_win)
+            conn.close()
+            return
+
+        # 포인트 차감하고 장바구니 비우기
+        c.execute("DELETE FROM cart WHERE user_id=?", (current_user['id'],))
+        c.execute("UPDATE users SET point = point - ? WHERE id=?", (count, current_user['id']))
+        conn.commit()
+        conn.close()
+
+        messagebox.showinfo("구매 완료", f"{count}개의 상품을 구매했습니다.\n{count} 포인트 차감되었습니다.", parent=cart_win)
+        cart_win.destroy()
+    tk.Button(cart_win, text="🛍 구매하기", command=purchase_items).pack(pady=5)
+
 
 
 def delete_product():
@@ -329,17 +374,31 @@ def delete_product():
 def refresh_home():
     list_products()
     if current_user:
-        login_status.config(text=f"현재 로그인: {current_user['username']}")
+        # 현재 포인트 가져오기
+        conn = sqlite3.connect("airforce_market.db")
+        c = conn.cursor()
+        c.execute("SELECT point FROM users WHERE id=?", (current_user['id'],))
+        pt = c.fetchone()[0]
+        conn.close()
+
+        # 로그인 상태 + 포인트 표시
+        login_status.config(text=f"현재 로그인: {current_user['username']} (포인트: {pt})")
+
         btn_login.grid_remove()
         btn_register.grid_remove()
         btn_logout.grid()
-        btn_admin_menu.grid()
+
+        if current_user.get("is_admin") == 1:
+            btn_admin_menu.grid()
+        else:
+            btn_admin_menu.grid_remove()
     else:
         login_status.config(text="로그인 필요")
         btn_logout.grid_remove()
         btn_login.grid()
         btn_register.grid()
         btn_admin_menu.grid_remove()
+
 
 
 def toggle_theme():
@@ -380,6 +439,7 @@ def show_selected_product_detail():
     if item:
         detail_win = tk.Toplevel(root)
         detail_win.title("상품 상세 보기")
+        detail_win.geometry("400x300")
         detail_win.attributes('-topmost', True)
         detail_win.grab_set()
         detail_win.focus_set()
@@ -427,7 +487,7 @@ create_default_admin()
 
 
 root.title("공군마켓 - AirForce Market")
-root.geometry("1200x700")
+root.state('zoomed')  # 전체화면 상태로 시작 (Windows 전용)
 root.configure(bg="#f0f4f8")
 
 
@@ -451,10 +511,6 @@ btn_frame.pack(pady=10)
 
 
 # 버튼 선언
-# 정렬 버튼
-btn_sort_asc = ttk.Button(btn_frame, text="⬆ 가격 낮은 순", style="Cool.TButton", command=lambda: list_products(order="ASC"))
-btn_sort_desc = ttk.Button(btn_frame, text="⬇ 가격 높은 순", style="Cool.TButton", command=lambda: list_products(order="DESC"))
-
 # 기능 버튼
 btn_register = ttk.Button(btn_frame, text="회원가입", style="Cool.TButton", command=register)
 btn_login = ttk.Button(btn_frame, text="로그인", style="Cool.TButton", command=login)
@@ -463,13 +519,14 @@ btn_add = ttk.Button(btn_frame, text="상품등록", style="Cool.TButton", comma
 btn_cart = ttk.Button(btn_frame, text="장바구니", style="Cool.TButton", command=view_cart)
 btn_sell = ttk.Button(btn_frame, text="✅ 판매 완료(삭제)", style="Cool.TButton", command=delete_product)
 btn_add_cart = ttk.Button(btn_frame, text="🛒 장바구니에 담기", style="Cool.TButton", command=add_to_cart)
-btn_detail = ttk.Button(btn_frame, text="🔍 상세보기", style="Cool.TButton", command=show_selected_product_detail)
 btn_refresh = ttk.Button(btn_frame, text="🔄 새로고침", style="Cool.TButton", command=refresh_home)
 btn_theme = ttk.Button(btn_frame, text="🌓 테마 전환", style="Cool.TButton", command=toggle_theme)
 
 # 관리자 메뉴
-btn_admin_menu = ttk.Button(btn_frame, text="👨‍✈️ 관리자 메뉴", style="Cool.TButton", command=admin_panel)
-btn_admin_menu.grid_remove()  # 기본은 숨김
+btn_admin_menu = ttk.Button(btn_frame, text="👨‍✈️ 관리자 메뉴", style="Cool.TButton", command=lambda: admin_panel(current_user))
+btn_admin_menu.grid(row=0, column=6, padx=5)
+btn_admin_menu.grid_remove()  # 기본 숨김
+
 
 # 첫 번째 줄 버튼 배치
 btn_register.grid(row=0, column=0, padx=5)
@@ -480,30 +537,52 @@ btn_cart.grid(row=0, column=4, padx=5)
 btn_sell.grid(row=0, column=5, padx=5)
 btn_admin_menu.grid(row=0, column=6, padx=5)
 btn_add_cart.grid(row=0, column=7, padx=5)
-btn_detail.grid(row=0, column=8, padx=5)
 btn_refresh.grid(row=0, column=9, padx=5)
 
 # 두 번째 줄
 btn_theme.grid(row=1, column=0, padx=5, pady=5)
-btn_sort_asc.grid(row=1, column=1, padx=5, pady=5)
-btn_sort_desc.grid(row=1, column=2, padx=5, pady=5)
 
-
-
-# 관리자 메뉴
-btn_admin_menu = ttk.Button(btn_frame, text="👨‍✈️ 관리자 메뉴", style="Cool.TButton", command=admin_panel)
-btn_admin_menu.grid_remove()  # 기본은 숨김
-
-
-
-product_frame = ttk.LabelFrame(root, text="\ud83d\udce6 \uc0c1\ud488 \ubaa9\ub85d", padding=10)
+# 상품 목록 프레임
+product_frame = ttk.LabelFrame(root, text="📦 상품 목록", padding=10)
 product_frame.pack(fill="both", expand=True, padx=20, pady=20)
+
+# ⬇️ Treeview + Scrollbar 담을 프레임
+tree_container = tk.Frame(product_frame)
+tree_container.pack(fill="both", expand=True)
+
+# Treeview 생성
 columns = ("ID", "상품명", "가격", "판매자")
-product_list = ttk.Treeview(product_frame, columns=columns, show="headings", height=15)
+product_list = ttk.Treeview(tree_container, columns=columns, show="headings")
+
 for col in columns:
     product_list.heading(col, text=col)
     product_list.column(col, anchor="center")
-product_list.pack(fill="both", expand=True)
+    
+def on_treeview_header_click(event):
+    global price_sort_order
+    region = product_list.identify_region(event.x, event.y)
+    col = product_list.identify_column(event.x)
+
+    if region == "heading" and col == "#3":  # 가격 열
+        price_sort_order = "DESC" if price_sort_order == "ASC" else "ASC"
+        list_products(price_sort_order)
+
+# ✅ Treeview 이벤트 바인딩 (헤더 클릭 감지)
+product_list.bind("<Button-1>", on_treeview_header_click)
+# ✅ 마우스 커서 바꾸기
+product_list.bind("<Enter>", lambda e: product_list.config(cursor="hand2"))
+product_list.bind("<Leave>", lambda e: product_list.config(cursor=""))
+# ✅ 더블 클릭으로 상세보기 열기
+product_list.bind("<Double-1>", lambda event: show_selected_product_detail())
+
+
+# 스크롤바 추가
+scrollbar = ttk.Scrollbar(tree_container, orient="vertical", command=product_list.yview)
+product_list.configure(yscrollcommand=scrollbar.set)
+
+# 배치
+product_list.pack(side="left", fill="both", expand=True)
+scrollbar.pack(side="right", fill="y")
 
 
 

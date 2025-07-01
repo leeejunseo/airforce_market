@@ -480,7 +480,7 @@ create_default_admin()
 
 
 root.title("공군마켓 - AirForce Market")
-root.state('zoomed')  # 전체화면 상태로 시작 (Windows 전용)
+root.geometry("1000x700")
 root.configure(bg="#f0f4f8")
 
 

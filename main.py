@@ -7,15 +7,11 @@ import bcrypt
 import os
 
 from admin import admin_panel
-
 from theme import apply_theme
-
-
 
 current_user = None
 is_dark_theme = False
 price_sort_order = "ASC"  # 기본 정렬: 오름차순
-
 
 root = tk.Tk()
 apply_theme(root)  # 스타일 적용!
@@ -258,17 +254,13 @@ def view_cart():
         messagebox.showerror("오류", "로그인 필요")
         return
 
-
-    # 새 창 생성
     cart_win = tk.Toplevel(root)
     cart_win.title("🛒 장바구니")
-    cart_win.geometry("400x400")
+    cart_win.geometry("500x500")
     cart_win.attributes('-topmost', True)
     cart_win.grab_set()
     cart_win.focus_set()
 
-
-    # Treeview 생성
     columns = ("상품명", "가격")
     cart_tree = ttk.Treeview(cart_win, columns=columns, show="headings")
     cart_tree.heading("상품명", text="상품명")
@@ -277,37 +269,29 @@ def view_cart():
     cart_tree.column("가격", anchor="center")
     cart_tree.pack(fill="both", expand=True, padx=10, pady=10)
 
-
-    # 데이터 불러오기
     conn = sqlite3.connect("airforce_market.db")
     c = conn.cursor()
-    c.execute("SELECT p.name, p.price FROM cart c JOIN products p ON c.product_id = p.id WHERE c.user_id=?",
+    c.execute("SELECT p.id, p.name, p.price FROM cart c JOIN products p ON c.product_id = p.id WHERE c.user_id=?",
               (current_user['id'],))
     items = c.fetchall()
     conn.close()
 
-
-    # 데이터 삽입
     total = 0
-    for name, price in items:
+    for pid, name, price in items:
         cart_tree.insert("", "end", values=(name, f"{price}원"))
         total += price
 
-
-    # 총합 표시
     total_label = tk.Label(cart_win, text=f"총합: {total}원", font=("Arial", 12, "bold"))
     total_label.pack(pady=5)
-    
-    # 구매 버튼
+
     def purchase_items():
         conn = sqlite3.connect("airforce_market.db")
         c = conn.cursor()
 
-        # 장바구니 개수
-        c.execute("SELECT COUNT(*) FROM cart WHERE user_id=?", (current_user['id'],))
-        count = c.fetchone()[0]
+        c.execute("SELECT product_id FROM cart WHERE user_id=?", (current_user['id'],))
+        items = c.fetchall()
+        count = len(items)
 
-        # 유저 포인트 확인
         c.execute("SELECT point FROM users WHERE id=?", (current_user['id'],))
         current_point = c.fetchone()[0]
 
@@ -320,16 +304,19 @@ def view_cart():
             conn.close()
             return
 
-        # 포인트 차감하고 장바구니 비우기
+        # 삭제: 장바구니 + 상품
+        for pid in items:
+            c.execute("DELETE FROM products WHERE id=?", (pid[0],))
         c.execute("DELETE FROM cart WHERE user_id=?", (current_user['id'],))
         c.execute("UPDATE users SET point = point - ? WHERE id=?", (count, current_user['id']))
         conn.commit()
         conn.close()
 
-        messagebox.showinfo("구매 완료", f"{count}개의 상품을 구매했습니다.\n{count} 포인트 차감되었습니다.", parent=cart_win)
+        messagebox.showinfo("구매 완료", f"{count}개의 상품을 구매했습니다.\n{count} 포인트 차감 및 상품 삭제 완료.", parent=cart_win)
         cart_win.destroy()
-    tk.Button(cart_win, text="🛍 구매하기", command=purchase_items).pack(pady=5)
+        refresh_home()
 
+    tk.Button(cart_win, text="🛍 구매하기", command=purchase_items).pack(pady=5)
 
 
 def delete_product():
@@ -428,28 +415,34 @@ def show_selected_product_detail():
         return
     product_id = product_list.item(selected[0])['values'][0]
 
-
     conn = sqlite3.connect("airforce_market.db")
     c = conn.cursor()
-    c.execute("SELECT name, price, description FROM products WHERE id=?", (product_id,))
+    c.execute("SELECT id, name, price, description FROM products WHERE id=?", (product_id,))
     item = c.fetchone()
     conn.close()
-
 
     if item:
         detail_win = tk.Toplevel(root)
         detail_win.title("상품 상세 보기")
-        detail_win.geometry("400x300")
+        detail_win.geometry("450x500")
         detail_win.attributes('-topmost', True)
         detail_win.grab_set()
         detail_win.focus_set()
 
-
-        tk.Label(detail_win, text=f"상품명: {item[0]}", font=("Arial", 14, "bold")).pack(pady=5)
-        tk.Label(detail_win, text=f"가격: {item[1]}원", font=("Arial", 12)).pack(pady=5)
-        desc = item[2] if item[2] else "설명 없음"
+        tk.Label(detail_win, text=f"상품명: {item[1]}", font=("Arial", 14, "bold")).pack(pady=5)
+        tk.Label(detail_win, text=f"가격: {item[2]}원", font=("Arial", 12)).pack(pady=5)
+        desc = item[3] if item[3] else "설명 없음"
         tk.Label(detail_win, text=f"설명:\n{desc}", wraplength=400, justify="left").pack(pady=10)
 
+        def add_from_detail():
+            conn = sqlite3.connect("airforce_market.db")
+            c = conn.cursor()
+            c.execute("INSERT INTO cart (user_id, product_id) VALUES (?, ?)", (current_user['id'], item[0]))
+            conn.commit()
+            conn.close()
+            messagebox.showinfo("장바구니", "상품을 장바구니에 추가했습니다.", parent=detail_win)
+
+        tk.Button(detail_win, text="🛒 장바구니 담기", command=add_from_detail).pack(pady=10)
 
 # -------------------- 관리자 기능 --------------------
 def view_all_users():
@@ -494,7 +487,7 @@ root.configure(bg="#f0f4f8")
 logo_frame = tk.Frame(root, bg="#f0f4f8")
 logo_frame.pack(pady=10)
 if os.path.exists("airforce_logo.png"):
-    logo_img = Image.open("airforce_logo.png").resize((300, 230))
+    logo_img = Image.open("airforce_logo.png")
     logo_photo = ImageTk.PhotoImage(logo_img)
     tk.Label(logo_frame, image=logo_photo, bg="#f0f4f8").pack()
 
@@ -517,8 +510,6 @@ btn_login = ttk.Button(btn_frame, text="로그인", style="Cool.TButton", comman
 btn_logout = ttk.Button(btn_frame, text="로그아웃", style="Cool.TButton", command=logout)
 btn_add = ttk.Button(btn_frame, text="상품등록", style="Cool.TButton", command=add_product)
 btn_cart = ttk.Button(btn_frame, text="장바구니", style="Cool.TButton", command=view_cart)
-btn_sell = ttk.Button(btn_frame, text="✅ 판매 완료(삭제)", style="Cool.TButton", command=delete_product)
-btn_add_cart = ttk.Button(btn_frame, text="🛒 장바구니에 담기", style="Cool.TButton", command=add_to_cart)
 btn_refresh = ttk.Button(btn_frame, text="🔄 새로고침", style="Cool.TButton", command=refresh_home)
 btn_theme = ttk.Button(btn_frame, text="🌓 테마 전환", style="Cool.TButton", command=toggle_theme)
 
@@ -534,9 +525,7 @@ btn_login.grid(row=0, column=1, padx=5)
 btn_logout.grid(row=0, column=2, padx=5)
 btn_add.grid(row=0, column=3, padx=5)
 btn_cart.grid(row=0, column=4, padx=5)
-btn_sell.grid(row=0, column=5, padx=5)
 btn_admin_menu.grid(row=0, column=6, padx=5)
-btn_add_cart.grid(row=0, column=7, padx=5)
 btn_refresh.grid(row=0, column=9, padx=5)
 
 # 두 번째 줄

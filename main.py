@@ -25,12 +25,15 @@ def init_db():
     conn = sqlite3.connect("airforce_market.db")
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT UNIQUE,
-        password TEXT,
-        is_admin INTEGER DEFAULT 0,
-        point INTEGER DEFAULT 3
-    )''')
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT UNIQUE,
+    password TEXT,
+    is_admin INTEGER DEFAULT 0,
+    point INTEGER DEFAULT 3,
+    number TEXT,        -- 교번
+    company TEXT,       -- 중대
+    class_year TEXT     -- 기수
+)''')
     c.execute('''CREATE TABLE IF NOT EXISTS products (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT,
@@ -68,24 +71,42 @@ def register():
     password_entry = tk.Entry(reg_win, show='*')
     password_entry.pack()
 
+    tk.Label(reg_win, text="교번:").pack()
+    number_entry = tk.Entry(reg_win)
+    number_entry.pack()
+
+    tk.Label(reg_win, text="중대:").pack()
+    company_entry = tk.Entry(reg_win)
+    company_entry.pack()
+
+    tk.Label(reg_win, text="기수:").pack()
+    class_year_entry = tk.Entry(reg_win)
+    class_year_entry.pack()
+
 
     def submit():
         username = username_entry.get()
         password = password_entry.get()
-        
+        number = number_entry.get()
+        company = company_entry.get()
+        class_year = class_year_entry.get()
+                
+                
         if username and password:
             hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt())
             try:
                 conn = sqlite3.connect("airforce_market.db")
                 c = conn.cursor()
-                c.execute("INSERT INTO users (username, password) VALUES (?, ?)", (username, hashed))
+                c.execute("""
+                    INSERT INTO users (username, password, number, company, class_year)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (username, hashed, number, company, class_year))
                 conn.commit()
                 conn.close()
                 messagebox.showinfo("회원가입", "회원가입 성공!", parent=reg_win)
                 reg_win.destroy()
             except sqlite3.IntegrityError:
                 messagebox.showerror("에러", "이미 존재하는 사용자입니다.", parent=reg_win)
-
 
     tk.Button(reg_win, text="가입하기", command=submit).pack(pady=5)
 
@@ -449,14 +470,23 @@ def view_all_users():
     if not (current_user and current_user['is_admin']):
         messagebox.showerror("오류", "관리자만 접근 가능")
         return
+
     conn = sqlite3.connect("airforce_market.db")
     c = conn.cursor()
-    c.execute("SELECT id, username FROM users")
+    # 교번(number), 중대(company), 기수(class_year) 추가 조회
+    c.execute("SELECT id, username, number, company, class_year FROM users")
     rows = c.fetchall()
     conn.close()
-    user_list = "\n".join([f"[{uid}] {uname}" for uid, uname in rows])
-    messagebox.showinfo("모든 사용자", user_list)
 
+    if not rows:
+        user_list = "등록된 사용자가 없습니다."
+    else:
+        user_list = "\n".join([
+            f"[{uid}] {uname} | 교번: {num or '없음'}, 중대: {comp or '없음'}, 기수: {cls or '없음'}"
+            for uid, uname, num, comp, cls in rows
+        ])
+
+    messagebox.showinfo("모든 사용자", user_list)
 
 # -------------------- 메인 GUI --------------------
 current_user = None

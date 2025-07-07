@@ -56,7 +56,7 @@ def init_db():
 def register():
     reg_win = tk.Toplevel(root)
     reg_win.title("회원가입")
-    reg_win.geometry("300x220")
+    reg_win.geometry("300x300")
     reg_win.attributes('-topmost', True)
     reg_win.grab_set()
     reg_win.focus_set()

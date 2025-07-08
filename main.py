@@ -24,16 +24,20 @@ def set_current_user(user):
 def init_db():
     conn = sqlite3.connect("airforce_market.db")
     c = conn.cursor()
+
+    # 사용자 테이블
     c.execute('''CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT UNIQUE,
-    password TEXT,
-    is_admin INTEGER DEFAULT 0,
-    point INTEGER DEFAULT 3,
-    number TEXT,        -- 교번
-    company TEXT,       -- 중대
-    class_year TEXT     -- 기수
-)''')
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE,
+        password TEXT,
+        is_admin INTEGER DEFAULT 0,
+        point INTEGER DEFAULT 3,
+        number TEXT,        -- 교번
+        company TEXT,       -- 중대
+        class_year TEXT     -- 기수
+    )''')
+
+    # 상품 테이블
     c.execute('''CREATE TABLE IF NOT EXISTS products (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT,
@@ -42,12 +46,28 @@ def init_db():
         seller_id INTEGER,
         FOREIGN KEY (seller_id) REFERENCES users(id)
     )''')
+
+    # 장바구니 테이블
     c.execute('''CREATE TABLE IF NOT EXISTS cart (
         user_id INTEGER,
         product_id INTEGER,
         FOREIGN KEY (user_id) REFERENCES users(id),
         FOREIGN KEY (product_id) REFERENCES products(id)
     )''')
+
+    # ✅ 거래 테이블 추가
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS transactions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            buyer_id INTEGER,
+            product_id INTEGER,
+            product_name TEXT,     -- 🆕 구매 당시 상품명
+            price INTEGER,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (buyer_id) REFERENCES users(id)
+        )
+    ''')
+
     conn.commit()
     conn.close()
 
@@ -309,7 +329,9 @@ def view_cart():
         conn = sqlite3.connect("airforce_market.db")
         c = conn.cursor()
 
-        c.execute("SELECT product_id FROM cart WHERE user_id=?", (current_user['id'],))
+        # 장바구니에서 상품 id 가져오기
+        c.execute("SELECT p.id, p.name, p.price FROM cart c JOIN products p ON c.product_id = p.id WHERE c.user_id=?",
+                (current_user['id'],))
         items = c.fetchall()
         count = len(items)
 
@@ -325,9 +347,12 @@ def view_cart():
             conn.close()
             return
 
-        # 삭제: 장바구니 + 상품
-        for pid in items:
-            c.execute("DELETE FROM products WHERE id=?", (pid[0],))
+        # 거래 내역 저장
+        for pid, name, price in items:
+            c.execute("INSERT INTO transactions (buyer_id, product_id, product_name, price) VALUES (?, ?, ?, ?)",
+                    (current_user['id'], pid, name, price))
+            c.execute("DELETE FROM products WHERE id=?", (pid,))
+
         c.execute("DELETE FROM cart WHERE user_id=?", (current_user['id'],))
         c.execute("UPDATE users SET point = point - ? WHERE id=?", (count, current_user['id']))
         conn.commit()

@@ -21,6 +21,7 @@ def admin_panel(current_user):  # 관리자 메뉴 패널 생성 함수
     ttk.Button(panel, text="사용자 삭제", width=25, command=lambda: delete_user(current_user)).pack(pady=5)
     ttk.Button(panel, text="상품 관리", width=25, command=manage_products).pack(pady=5)
     ttk.Button(panel, text="관리자 권한 부여", width=25, command=promote_user).pack(pady=5)
+    ttk.Button(panel, text="거래 내역 조회", width=25, command=view_transactions).pack(pady=5)
 
 def view_all_users():  # 모든 사용자 보기 함수 호출
     conn = get_db_connection()
@@ -127,3 +128,33 @@ def promote_user():  # 일반 사용자를 관리자 권한으로 승격하는 �
     conn.commit()
     conn.close()
     messagebox.showinfo("완료", f"사용자 {uid}가 관리자로 승격되었습니다.")
+
+def view_transactions():
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute("""
+        SELECT t.id, u.username AS 구매자명, t.product_name, t.price, t.timestamp
+        FROM transactions t
+        JOIN users u ON t.buyer_id = u.id
+        ORDER BY t.timestamp DESC
+    """)
+
+    rows = c.fetchall()
+    conn.close()
+
+    win = tk.Toplevel()
+    win.title("거래 내역 전체 조회")
+    win.geometry("700x400")
+    win.attributes('-topmost', True)
+
+    tree = ttk.Treeview(win, columns=("ID", "구매자", "상품명", "가격", "시간"), show="headings")
+    tree.heading("ID", text="ID")
+    tree.heading("구매자", text="구매자")
+    tree.heading("상품명", text="상품명")
+    tree.heading("가격", text="가격")
+    tree.heading("시간", text="구매 시각")
+
+    for row in rows:
+        tree.insert("", "end", values=row)
+
+    tree.pack(fill="both", expand=True)

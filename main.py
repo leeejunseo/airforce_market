@@ -10,7 +10,6 @@ from admin import admin_panel
 from theme import apply_theme
 
 current_user = None
-is_dark_theme = False
 price_sort_order = "ASC"  # 기본 정렬: 오름차순
 
 root = tk.Tk()
@@ -44,6 +43,8 @@ def init_db():
         price INTEGER,
         description TEXT,
         seller_id INTEGER,
+        status TEXT DEFAULT '판매중',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (seller_id) REFERENCES users(id)
     )''')
 
@@ -51,6 +52,7 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS cart (
         user_id INTEGER,
         product_id INTEGER,
+        PRIMARY KEY (user_id, product_id),
         FOREIGN KEY (user_id) REFERENCES users(id),
         FOREIGN KEY (product_id) REFERENCES products(id)
     )''')
@@ -245,8 +247,6 @@ def add_product():
 
 
     tk.Button(prod_win, text="등록", command=submit).pack(pady=5)
-
-
 # -------------------- 상품 목록 --------------------
 def list_products(order="ASC"):
     conn = sqlite3.connect("airforce_market.db")
@@ -255,8 +255,10 @@ def list_products(order="ASC"):
         SELECT p.id, p.name, p.price, u.username 
         FROM products p 
         JOIN users u ON p.seller_id = u.id 
+        WHERE p.status = '판매중'
         ORDER BY p.price {order}
     """
+
     c.execute(query)
     rows = c.fetchall()
     conn.close()
@@ -272,7 +274,6 @@ def list_products(order="ASC"):
 
     for row in rows:
         product_list.insert("", "end", values=(row[0], row[1], f"{row[2]}원", row[3]))
-
 # -------------------- 장바구니 --------------------
 def add_to_cart():
     if not current_user:
@@ -281,14 +282,23 @@ def add_to_cart():
     selected = product_list.selection()
     if not selected:
         return
+
     product_id = product_list.item(selected[0])['values'][0]
     conn = sqlite3.connect("airforce_market.db")
     c = conn.cursor()
-    c.execute("INSERT INTO cart (user_id, product_id) VALUES (?, ?)", (current_user['id'], product_id))
-    conn.commit()
-    conn.close()
-    messagebox.showinfo("장바구니", "상품을 장바구니에 추가했습니다.")
 
+    # 이미 장바구니에 있는지 확인
+    c.execute("SELECT 1 FROM cart WHERE user_id=? AND product_id=?", (current_user['id'], product_id))
+    exists = c.fetchone()
+
+    if exists:
+        messagebox.showinfo("장바구니", "이미 장바구니에 있는 상품입니다.")
+    else:
+        c.execute("INSERT INTO cart (user_id, product_id) VALUES (?, ?)", (current_user['id'], product_id))
+        conn.commit()
+        messagebox.showinfo("장바구니", "상품을 장바구니에 추가했습니다.")
+
+    conn.close()
 
 def view_cart():
     if not current_user:
@@ -330,7 +340,7 @@ def view_cart():
         c = conn.cursor()
 
         # 장바구니에서 상품 id 가져오기
-        c.execute("SELECT p.id, p.name, p.price FROM cart c JOIN products p ON c.product_id = p.id WHERE c.user_id=?",
+        c.execute("SELECT p.id, p.name, p.price FROM cart c JOIN products p ON c.product_id = p.id WHERE c.user_id=? AND p.status = '판매중'",
                 (current_user['id'],))
         items = c.fetchall()
         count = len(items)
@@ -339,7 +349,7 @@ def view_cart():
         current_point = c.fetchone()[0]
 
         if count == 0:
-            messagebox.showwarning("경고", "장바구니가 비어 있습니다.", parent=cart_win)
+            messagebox.showwarning("경고", "장바구니가 비어 있거나 상품이 이미 판매되었습니다.", parent=cart_win)
             conn.close()
             return
         if current_point < count:
@@ -347,23 +357,22 @@ def view_cart():
             conn.close()
             return
 
-        # 거래 내역 저장
+        # 거래 처리
         for pid, name, price in items:
             c.execute("INSERT INTO transactions (buyer_id, product_id, product_name, price) VALUES (?, ?, ?, ?)",
                     (current_user['id'], pid, name, price))
-            c.execute("DELETE FROM products WHERE id=?", (pid,))
+            c.execute("UPDATE products SET status = '판매완료' WHERE id = ?", (pid,))
 
         c.execute("DELETE FROM cart WHERE user_id=?", (current_user['id'],))
         c.execute("UPDATE users SET point = point - ? WHERE id=?", (count, current_user['id']))
         conn.commit()
         conn.close()
 
-        messagebox.showinfo("구매 완료", f"{count}개의 상품을 구매했습니다.\n{count} 포인트 차감 및 상품 삭제 완료.", parent=cart_win)
+        messagebox.showinfo("구매 완료", f"{count}개의 상품을 구매했습니다.\n{count} 포인트 차감 및 상품 상태 변경 완료.", parent=cart_win)
         cart_win.destroy()
         refresh_home()
 
     tk.Button(cart_win, text="🛍 구매하기", command=purchase_items).pack(pady=5)
-
 
 def delete_product():
     if not current_user:
@@ -396,13 +405,11 @@ def delete_product():
     # 삭제 확인
     confirm = messagebox.askyesno("삭제 확인", "정말로 이 상품을 판매 완료(삭제)하시겠습니까?")
     if confirm:
-        c.execute("DELETE FROM products WHERE id=?", (product_id,))
+        c.execute("UPDATE products SET status = '판매완료' WHERE id=?", (product_id,))
         conn.commit()
-        messagebox.showinfo("삭제 완료", "상품이 삭제되었습니다.")
+        messagebox.showinfo("판매 완료", "상품이 판매 완료 처리되었습니다.")
     conn.close()
     refresh_home()
-
-
 
 def refresh_home():
     list_products()
@@ -431,29 +438,6 @@ def refresh_home():
         btn_login.grid()
         btn_register.grid()
         btn_admin_menu.grid_remove()
-
-
-
-def toggle_theme():
-    global is_dark_theme
-    is_dark_theme = not is_dark_theme
-
-    if is_dark_theme:
-        bg_color = "#2e2e2e"
-        fg_color = "#ffffff"
-    else:
-        bg_color = "#f0f4f8"
-        fg_color = "#000000"
-
-    root.configure(bg=bg_color)
-    top_frame.configure(bg=bg_color)
-    logo_frame.configure(bg=bg_color)
-    btn_frame.configure(bg=bg_color)
-    login_status.configure(bg=bg_color, fg=fg_color)
-
-    # 버튼도 재색칠하고 싶다면 Style 활용 가능
-
-
 # -------------------- 상품 상세 보기 --------------------
 def show_selected_product_detail():
     selected = product_list.selection()
@@ -481,15 +465,25 @@ def show_selected_product_detail():
         tk.Label(detail_win, text=f"설명:\n{desc}", wraplength=400, justify="left").pack(pady=10)
 
         def add_from_detail():
-            conn = sqlite3.connect("airforce_market.db")
-            c = conn.cursor()
-            c.execute("INSERT INTO cart (user_id, product_id) VALUES (?, ?)", (current_user['id'], item[0]))
-            conn.commit()
-            conn.close()
-            messagebox.showinfo("장바구니", "상품을 장바구니에 추가했습니다.", parent=detail_win)
+            try:
+                conn = sqlite3.connect("airforce_market.db")
+                c = conn.cursor()
+                
+                # 중복 확인
+                c.execute("SELECT 1 FROM cart WHERE user_id=? AND product_id=?", (current_user['id'], item[0]))
+                if c.fetchone():
+                    messagebox.showinfo("장바구니", "이미 장바구니에 있는 상품입니다.", parent=detail_win)
+                else:
+                    c.execute("INSERT INTO cart (user_id, product_id) VALUES (?, ?)", (current_user['id'], item[0]))
+                    conn.commit()
+                    messagebox.showinfo("장바구니", "상품을 장바구니에 추가했습니다.", parent=detail_win)
+
+            except sqlite3.OperationalError as e:
+                messagebox.showerror("DB 오류", f"데이터베이스 오류 발생: {e}", parent=detail_win)
+            finally:
+                conn.close()
 
         tk.Button(detail_win, text="🛒 장바구니 담기", command=add_from_detail).pack(pady=10)
-
 # -------------------- 관리자 기능 --------------------
 def view_all_users():
     if not (current_user and current_user['is_admin']):
@@ -532,8 +526,6 @@ def create_default_admin():
 
 create_default_admin()
 
-
-
 root.title("공군마켓 - AirForce Market")
 root.geometry("1000x700")
 root.configure(bg="#f0f4f8")
@@ -566,7 +558,6 @@ btn_logout = ttk.Button(btn_frame, text="로그아웃", style="Cool.TButton", co
 btn_add = ttk.Button(btn_frame, text="상품등록", style="Cool.TButton", command=add_product)
 btn_cart = ttk.Button(btn_frame, text="장바구니", style="Cool.TButton", command=view_cart)
 btn_refresh = ttk.Button(btn_frame, text="🔄 새로고침", style="Cool.TButton", command=refresh_home)
-btn_theme = ttk.Button(btn_frame, text="🌓 테마 전환", style="Cool.TButton", command=toggle_theme)
 
 # 관리자 메뉴
 btn_admin_menu = ttk.Button(btn_frame, text="👨‍✈️ 관리자 메뉴", style="Cool.TButton", command=lambda: admin_panel(current_user))
@@ -584,7 +575,6 @@ btn_admin_menu.grid(row=0, column=6, padx=5)
 btn_refresh.grid(row=0, column=9, padx=5)
 
 # 두 번째 줄
-btn_theme.grid(row=1, column=0, padx=5, pady=5)
 
 # 상품 목록 프레임
 product_frame = ttk.LabelFrame(root, text="📦 상품 목록", padding=10)
@@ -619,7 +609,6 @@ product_list.bind("<Leave>", lambda e: product_list.config(cursor=""))
 # ✅ 더블 클릭으로 상세보기 열기
 product_list.bind("<Double-1>", lambda event: show_selected_product_detail())
 
-
 # 스크롤바 추가
 scrollbar = ttk.Scrollbar(tree_container, orient="vertical", command=product_list.yview)
 product_list.configure(yscrollcommand=scrollbar.set)
@@ -627,8 +616,6 @@ product_list.configure(yscrollcommand=scrollbar.set)
 # 배치
 product_list.pack(side="left", fill="both", expand=True)
 scrollbar.pack(side="right", fill="y")
-
-
 
 refresh_home()
 root.mainloop()
